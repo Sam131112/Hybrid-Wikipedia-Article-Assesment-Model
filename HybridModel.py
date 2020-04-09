@@ -37,7 +37,7 @@ class SequenceModel(torch.nn.Module):
             self.embedding_layer.weight.data.copy_(Field_obj.vocab.vectors)
             self.embedding_layer.requires_grad = True
             self.BiLstm = torch.nn.LSTM(self.embed_size,self.hidden_size,\
-                    dropout=0.4,num_layers=2,bidirectional=True)
+                    dropout=0.5,num_layers=2,bidirectional=True)
             self.fc1= torch.nn.Linear(self.hidden_size*2,128)
             self.fc2 = torch.nn.Linear(128+self.ext_feats_size,64)
             torch.nn.init.xavier_uniform_(self.fc1.weight)
@@ -45,7 +45,6 @@ class SequenceModel(torch.nn.Module):
             self.drop = torch.nn.Dropout(0.5)
             self.batchnorm128 = torch.nn.BatchNorm1d(128)
             self.batchnorm64 = torch.nn.BatchNorm1d(64)
-            self.fc2 = torch.nn.Linear(128,64)
             torch.nn.init.xavier_uniform_(self.fc2.weight)
             self.fc3 = torch.nn.Linear(64,self.out_class)
             torch.nn.init.xavier_uniform_(self.fc3.weight)
@@ -57,9 +56,15 @@ class SequenceModel(torch.nn.Module):
             output,out_len = torch.nn.utils.rnn.pad_packed_sequence(packed_output)
             output,_ = torch.max(output,axis=0) # MaxPooling along sequences
             out_fc1 = self.fc1(output)
-
-            
-
+            out_fc1 = self.batchnorm128(out_fc1)
+            out_fc1 = self.relu(out_fc1)
+            out_fc1 = self.drop(out_fc1)
+            out_fc1 = torch.cat((out_fc1,feats),axis=1)
+            out_fc2 = self.fc2(out_fc1)
+            out_fc2 = self.batchnorm64(out_fc2)
+            out_fc2 = self.relu(out_fc2)
+            out_fc2 = self.drop(out_fc2)
+            predict = self.fc3(out_fc2)
             return predict
 
 def spacy_tokenizer(x):
@@ -89,15 +94,15 @@ def prepare_data():
             postprocessing=torchtext.data.Pipeline(postpipeline),is_target=False)
     pretrained_vector = Vectors("glove.6B.50d.txt")
     train_fields = [("Clean_Text",TEXT),("label",LABEL),("Feats",FEATS)]
-    train = torchtext.data.TabularDataset('train.csv',format='csv',\
+    train = torchtext.data.TabularDataset('Train.csv',format='csv',\
             skip_header=True,fields=train_fields)
-    val = torchtext.data.TabularDataset('validation.csv',format='csv',\
+    val = torchtext.data.TabularDataset('Validation.csv',format='csv',\
             skip_header=True,fields=train_fields)
-    test_fields = [("Clean_Text",TEXT),('label',LABEL),,("Feats",FEATS)]
-    test = torchtext.data.TabularDataset('test.csv',format='csv',skip_header=True,\
+    test_fields = [("Clean_Text",TEXT),('label',LABEL),("Feats",FEATS)]
+    test = torchtext.data.TabularDataset('Test.csv',format='csv',skip_header=True,\
                 fields=test_fields)
 
-    TEXT.build_vocab(train,max_size=75000,min_freq=20,\
+    TEXT.build_vocab(train,max_size=50000,min_freq=20,\
             vectors=pretrained_vector,unk_init=torch.Tensor.uniform_)
     train_iter = torchtext.data.BucketIterator(train,device=device,\
             batch_size=Batch_Size,sort_key=lambda x:len(x.Clean_Text),\
@@ -126,16 +131,15 @@ def train_engine(model,train_iter,val_iter,epochs):
         train_accuracy = 0.0
         for batch in tqdm(train_iter):
             optimizer.zero_grad()
-            #print("Iteration ",batch)
             seq , seq_len = batch.Clean_Text
             y = batch.label
             feats = torch.tensor(batch.Feats,dtype=torch.float32)
             seq.to(device)
             seq_len.to(device)
             y.to(device)
-            feats.to(device)
+            #feats.to(device)
             #print(seq,seq_len,y)
-            pred = model(seq,seq_len,feats)
+            pred = model(seq,seq_len,feats.to(device))
             loss = criteria(pred,y)
             train_loss = train_loss + loss.item()
             _,predictions = torch.max(pred,axis=1)
@@ -154,11 +158,11 @@ def train_engine(model,train_iter,val_iter,epochs):
                 seq , seq_len = batch.Clean_Text
                 y = batch.label
                 feats = torch.tensor(batch.Feats,dtype=torch.float32)
-                feats.to(device)
+                #feats.to(device)
                 seq.to(device)
                 seq_len.to(device)
                 y.to(device)
-                pred = model(seq,seq_len,feats)
+                pred = model(seq,seq_len,feats.to(device))
                 loss = criteria(pred,y)
                 val_loss = val_loss + loss.item()
                 _,predictions = torch.max(pred,axis=1)
@@ -170,7 +174,7 @@ def train_engine(model,train_iter,val_iter,epochs):
             torch.save({
                 'model_state_dict':model.state_dict(),
                 'optimizer_state_dict':optimizer.state_dict(),
-                'loss':loss,},'saved_model.pth')
+                'loss':loss,},'saved_modelv1.pth')
             validation_best = val_epoch_accuracy
         print("Training Loss , Training Accuracy ",(train_loss/(len(train_iter)*1.0)),\
                 (train_accuracy/(len(train_iter)*1.0)).item())
@@ -187,11 +191,10 @@ def test_engine(model,test_iter):
                 seq , seq_len = batch.Clean_Text
                 y = batch.label
                 feats = torch.tensor(batch.Feats,dtype=torch.float32)
-                feats.to(device)
                 seq.to(device)
                 seq_len.to(device)
                 y.to(device)
-                pred = model(seq,seq_len,feats)
+                pred = model(seq,seq_len,feats.to(device))
                 _,predictions = torch.max(pred,axis=1)
                 test_accuracy = test_accuracy + torch.eq(predictions,y).sum()/(len(y)*1.0)
 
@@ -199,18 +202,19 @@ def test_engine(model,test_iter):
         print("Final Test Accuracy ",test_accuracy/(len(test_iter)*1.0))
 
 def main():
-    df = pd.read_csv("train.csv")
+    df = pd.read_csv("Train.csv")
+    feats_sz = 19
     train_iter ,val_iter , test_iter , TXT  = prepare_data()
     print("Data Preprocessed")
     hidden = 256
     vocab , embed  = TXT.vocab.vectors.shape[0],TXT.vocab.vectors.shape[1]
     class_sz = len(df["label"].unique())
-    model = SequenceModel(vocab,embed,hidden,TXT,class_sz)
+    model = SequenceModel(vocab,feats_sz,embed,hidden,TXT,class_sz)
     model.to(device)
     print("Start Training",TXT.vocab.vectors.shape)
     train_engine(model,train_iter,val_iter,25)
-    model_best = SequenceModel(vocab,embed,hidden,TXT,class_sz)
-    checkpoint = torch.load("saved_model.pth")
+    model_best = SequenceModel(vocab,feats_sz,embed,hidden,TXT,class_sz)
+    checkpoint = torch.load("saved_modelv1.pth")
     model_best.load_state_dict(checkpoint["model_state_dict"])
     model_best.to(device)
     test_engine(model_best,test_iter)
