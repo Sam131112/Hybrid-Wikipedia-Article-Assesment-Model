@@ -34,7 +34,7 @@ def main():
 
 def meta(x):
 
-    all_feats = ["infobox","flesch_reading_ease","smog_index","flesch_kincaid_grade","coleman_liau_index","automated_readability_index","dale_chall_readability_score","difficult_words","linsear_write_formula","gunning_fog","Article_to_bytes","References","In_links","Num_templates","Img_by_article_len","Information_to_noise","Level2head","Level3head"]
+    all_feats = ["infobox","flesch_reading_ease","smog_index","flesch_kincaid_grade","coleman_liau_index","automated_readability_index","dale_chall_readability_score","difficult_words","linsear_write_formula","gunning_fog","Article_to_bytes","References","In_links","Num_templates","Img_by_article_len","Information_to_noise","Level2head","Level3head","Num_categories"]
     txt = ""
     for row in all_feats:
         txt = txt + " " + str(x[row])
@@ -45,7 +45,9 @@ def meta(x):
 def main1():
 
     all_feats = ["infobox","flesch_reading_ease","smog_index","flesch_kincaid_grade","coleman_liau_index","automated_readability_index","dale_chall_readability_score","difficult_words","linsear_write_formula","gunning_fog","Article_to_bytes","References","In_links","Num_templates","Img_by_article_len","Information_to_noise","Level2head","Level3head","Num_categories"]
+    
     print("Feature Count ",len(all_feats))
+    
     df = pd.read_csv("Full_Data.csv")
     df["Feats"] = df.apply(meta,axis=1)
     for feat in all_feats:
@@ -57,7 +59,7 @@ def main1():
     validation.to_csv("Validation.csv",index=False,header=True)
     print("New Columns ",df.columns)
     df.to_csv("Data_with_Feats.csv",index=False,header=True)
-
+    
 
 if __name__ == "__main__":
     main1()
